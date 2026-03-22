@@ -1,27 +1,46 @@
 ---
 name: weixin-openclaw-login
-description: Diagnose and complete WeChat/OpenClaw personal-account login via the official `@tencent-weixin/openclaw-weixin` plugin. Use when installing the plugin, generating a fresh QR login URL, checking QR status, recovering from `SETUP / no token`, or documenting how WeChat 8.0.70+ connects to OpenClaw.
+description: 处理微信个人号接入 OpenClaw 的官方登录流程与排障。用于安装 `@tencent-weixin/openclaw-weixin`、获取新的二维码授权链接、查询扫码状态、修复 `openclaw-weixin` 卡在 `SETUP / no token`、以及整理微信 8.0.70+ 接入 OpenClaw 的说明文档。
 ---
 
 # Weixin OpenClaw Login
 
-Use this skill to install, debug, or document the official WeChat ↔ OpenClaw login flow.
+这个 skill 用来安装、排查、记录微信个人号接入 OpenClaw 的官方登录流程。
 
-## Quick workflow
+## 快速流程
 
-1. Install or update the plugin:
+1. 安装或更新插件：
    - `npx -y @tencent-weixin/openclaw-weixin-cli install`
-2. If terminal QR rendering is inconvenient, fetch the raw QR login URL directly.
-3. Ask the user to open the URL on a computer and scan it with WeChat.
-4. Poll login status until `confirmed` or a `bot_token` appears.
-5. Verify channel state with `openclaw status`.
-6. If login succeeded upstream but OpenClaw still shows `SETUP / no token`, inspect the local state files under `~/.openclaw/openclaw-weixin/`.
+2. 如果终端字符二维码不方便扫码，直接抓取原始二维码授权链接。
+3. 让用户在电脑上打开二维码页面，用微信扫码。
+4. 轮询扫码状态，直到出现 `confirmed` 或 `bot_token`。
+5. 用 `openclaw status` 检查渠道状态。
+6. 如果腾讯侧已经确认登录，但 OpenClaw 仍显示 `SETUP / no token`，检查本地状态文件 `~/.openclaw/openclaw-weixin/`。
 
-## Getting the raw authorization link
+## 优先使用脚本
 
-The plugin source shows that login uses Tencent's ilink endpoints and returns a direct QR page URL.
+优先使用本 skill 自带脚本：
 
-Preferred command:
+- 获取新二维码链接：`scripts/get-login-url.js`
+- 轮询扫码状态：`scripts/poll-login-status.py <qrcode>`
+
+如果只需要快速人工操作，可继续使用下面的命令版步骤。
+
+## 获取原始授权链接
+
+插件源码表明，登录本质上是调用腾讯 ilink 接口并拿到一个真实的二维码页面 URL。
+
+优先命令：
+
+```bash
+node scripts/get-login-url.js
+```
+
+脚本会打印：
+- `qrcode_img_content`：真正应该在浏览器打开的二维码页面链接
+- `QRCODE=...`：用于查询扫码状态的 token
+
+如果不想用脚本，也可以直接执行：
 
 ```bash
 node - <<'NODE'
@@ -35,15 +54,23 @@ fetch(url)
 NODE
 ```
 
-Expected fields:
-- `qrcode_img_content`: the real QR page URL to open in a browser
-- `qrcode`: the QR token used for status polling
+相比转发终端字符二维码，这种方式通常更稳。
 
-This is usually more reliable than forwarding terminal block-art QR codes through chat channels.
+## 查询扫码状态
 
-## Polling login status
+推荐脚本：
 
-Use the `qrcode` token from the previous step:
+```bash
+python3 scripts/poll-login-status.py <qrcode>
+```
+
+例如：
+
+```bash
+python3 scripts/poll-login-status.py 1cf42ee545e62408992daa64b38a37d9
+```
+
+如果只想单次查询，也可以用命令方式：
 
 ```bash
 python3 - <<'PY'
@@ -56,23 +83,23 @@ with urllib.request.urlopen(req, timeout=40) as r:
 PY
 ```
 
-Useful states:
-- `wait`: nobody scanned yet
-- `scaned`: scanned but not fully confirmed
-- `confirmed`: login accepted
-- response may also include `bot_token`, `ilink_bot_id`, `baseurl`, `ilink_user_id`
+常见状态：
+- `wait`：还没扫码
+- `scaned`：已经扫码，但还没最终确认
+- `confirmed`：已确认登录
+- 返回里还可能带：`bot_token`、`ilink_bot_id`、`baseurl`、`ilink_user_id`
 
-If `bot_token` appears, the upstream login succeeded even if OpenClaw has not updated its own local status yet.
+只要出现 `bot_token`，就可以认定腾讯侧登录已经成功，即使 OpenClaw 本地状态还没立刻刷新。
 
-## Where OpenClaw stores WeChat login state
+## OpenClaw 本地把微信状态存在哪里
 
-Inspect:
+检查这些路径：
 
 - `~/.openclaw/openclaw-weixin/accounts.json`
 - `~/.openclaw/openclaw-weixin/accounts/<account-id>.json`
-- optional sync buffer files like `*.sync.json`
+- 可选同步缓冲文件：`*.sync.json`
 
-A healthy account file usually contains:
+一个正常的账号文件通常长这样：
 
 ```json
 {
@@ -82,33 +109,33 @@ A healthy account file usually contains:
 }
 ```
 
-Normalized account ids typically convert `@` and `.` into `-`, for example:
-- raw: `4b22f436d38f@im.bot`
-- normalized: `4b22f436d38f-im-bot`
+账号 id 一般会把 `@` 和 `.` 规范化成 `-`，例如：
+- 原始：`4b22f436d38f@im.bot`
+- 规范化：`4b22f436d38f-im-bot`
 
-## Verification
+## 验证是否真正完成
 
-Run:
+执行：
 
 ```bash
 openclaw status
 ```
 
-Success looks like:
-- channel `openclaw-weixin`
-- state `OK`
-- detail showing account count instead of `no token`
+成功时通常表现为：
+- channel 是 `openclaw-weixin`
+- state 是 `OK`
+- detail 显示账号数量，而不是 `no token`
 
-Failure looks like:
+失败时通常表现为：
 - `SETUP`
 - `no token`
 
-## When the scan succeeded but OpenClaw still shows `no token`
+## 如果扫码成功了，但 OpenClaw 还显示 `no token`
 
-1. Confirm the poll result already returned `bot_token`.
-2. Check whether the expected files under `~/.openclaw/openclaw-weixin/` were created.
-3. If files exist, restart gateway:
+1. 先确认轮询结果里已经出现 `bot_token`。
+2. 再检查 `~/.openclaw/openclaw-weixin/` 下对应文件是否已写入。
+3. 如果文件已经存在，重启 gateway：
    - `openclaw gateway restart`
-4. Re-check `openclaw status`.
+4. 再次执行 `openclaw status` 确认状态。
 
-If you need more implementation detail, read `references/implementation-notes.md`.
+如果需要更底层的实现说明，读取 `references/implementation-notes.md`。

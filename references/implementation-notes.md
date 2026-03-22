@@ -1,36 +1,38 @@
-# Implementation Notes
+# 实现说明
 
-## Why the raw QR URL can be extracted
+## 为什么可以抓到原始二维码链接
 
-Inside the official plugin source:
+官方插件源码里，登录流程大致是这样的：
 
 - `src/auth/login-qr.ts`
-  - calls `GET https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3`
-  - receives JSON with:
+  - 调用 `GET https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3`
+  - 返回 JSON，里面有：
     - `qrcode`
     - `qrcode_img_content`
 - `src/channel.ts`
-  - tries to render the QR with `qrcode-terminal`
-  - falls back to printing `二维码链接: ${startResult.qrcodeUrl}` if terminal QR rendering is unavailable
+  - 优先尝试用 `qrcode-terminal` 在终端里渲染字符二维码
+  - 如果不可用，就回退打印：`二维码链接: ${startResult.qrcodeUrl}`
 
-So the terminal QR is only a presentation layer. The real login artifact is the URL in `qrcode_img_content`.
+所以终端二维码只是展示层；真正的登录载体其实是 `qrcode_img_content` 这个 URL。
 
-## Why this matters
+## 为什么这个方法更靠谱
 
-Terminal QR blocks often break when:
-- relayed over iMessage, Messenger, Telegram, etc.
-- fonts are not truly monospace
-- screenshots crop the quiet zone
+终端字符二维码很容易在这些场景里失真：
 
-Using the raw `qrcode_img_content` URL avoids all of that.
+- iMessage / Messenger / Telegram 等聊天软件转发
+- 字体不是严格等宽
+- 截图时边缘安静区被裁掉
+- 通过消息中继表面再次渲染
 
-## Poll endpoint
+直接使用 `qrcode_img_content`，让用户在电脑浏览器打开，再用手机微信扫，成功率通常高得多。
 
-The plugin also uses:
+## 查询状态的接口
+
+插件还会调用：
 
 `GET https://ilinkai.weixin.qq.com/ilink/bot/get_qrcode_status?qrcode=<token>`
 
-Typical successful payload includes:
+常见成功返回：
 
 ```json
 {
@@ -42,24 +44,24 @@ Typical successful payload includes:
 }
 ```
 
-In practice, seeing `bot_token` is enough to know Tencent side has accepted the login.
+在实际排障里，只要出现 `bot_token`，基本就可以认为腾讯侧已经接受了登录。
 
-## Local state layout
+## 本地状态目录
 
-The official plugin code resolves state dir to:
+官方插件解析状态目录的顺序是：
 
-- `OPENCLAW_STATE_DIR`, else
-- `CLAWDBOT_STATE_DIR`, else
-- `~/.openclaw`
+- `OPENCLAW_STATE_DIR`
+- 否则 `CLAWDBOT_STATE_DIR`
+- 否则 `~/.openclaw`
 
-Then it writes WeChat state under:
+然后把微信状态写到：
 
 - `~/.openclaw/openclaw-weixin/accounts.json`
 - `~/.openclaw/openclaw-weixin/accounts/*.json`
 
-## Good operator checklist
+## 操作建议
 
-- Prefer raw QR URLs over forwarding text QR art.
-- Prefer checking poll responses before blaming the user scan.
-- Verify local token persistence separately from upstream confirmation.
-- Use `openclaw status` as the final truth for channel readiness.
+- 优先发原始二维码链接，不要优先发字符二维码。
+- 优先看轮询接口结果，不要先怀疑用户没扫好。
+- 把“腾讯侧确认成功”和“OpenClaw 本地状态已落盘”分开检查。
+- 最终以 `openclaw status` 作为渠道是否可用的准绳。
